@@ -141,15 +141,6 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             topMargin = dp(35); bottomMargin = dp(35)
         })
-        val sort = when (mode) {
-            "latest" -> "-publishedAt"
-            "views" -> "-views"
-            else -> "-trending"
-        }
-        var endpoint = "$apiBase/api/v1/videos?count=30&sort=$sort&nsfw=false&skipCount=true"
-        if (!query.isNullOrBlank()) {
-            endpoint += "&search=" + URLEncoder.encode(query, "UTF-8")
-        }
         executor.execute {
             val videos = fetchVideos(mode, query)
             runOnUiThread {
