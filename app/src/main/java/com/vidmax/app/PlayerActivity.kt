@@ -42,10 +42,10 @@ class PlayerActivity : Activity() {
         setContentView(FrameLayout(this).apply {
             addView(playerView, FrameLayout.LayoutParams(-1, -1))
         })
-        initializePlayer(uri)
+        initializePlayer(uri, intent.getBooleanExtra(EXTRA_AUTOPLAY, true))
     }
 
-    private fun initializePlayer(uri: Uri) {
+    private fun initializePlayer(uri: Uri, autoplay: Boolean) {
         val instance = ExoPlayer.Builder(this).build()
         player = instance
         playerView.player = instance
@@ -60,7 +60,7 @@ class PlayerActivity : Activity() {
         })
         instance.setMediaItem(MediaItem.fromUri(uri))
         instance.prepare()
-        instance.playWhenReady = true
+        instance.playWhenReady = autoplay
     }
 
     override fun onStop() {
@@ -77,5 +77,6 @@ class PlayerActivity : Activity() {
 
     companion object {
         const val EXTRA_MEDIA_URI = "com.vidmax.app.extra.MEDIA_URI"
+        const val EXTRA_AUTOPLAY = "com.vidmax.app.extra.AUTOPLAY"
     }
 }
