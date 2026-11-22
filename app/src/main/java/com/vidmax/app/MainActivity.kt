@@ -53,6 +53,77 @@ class MainActivity : Activity() {
         window.navigationBarColor = navy
         buildShell()
         showFeed("trending")
+        handleYoutubeIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleYoutubeIntent(intent)
+    }
+
+    private fun handleYoutubeIntent(source: Intent?) {
+        if (source == null) return
+        val shared = when (source.action) {
+            Intent.ACTION_SEND -> source.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+            Intent.ACTION_VIEW -> source.dataString.orEmpty()
+            else -> return
+        }
+        val link = shared.split(Regex("\\s+")).firstOrNull {
+            it.startsWith("https://www.youtube.com/") || it.startsWith("https://youtube.com/") ||
+            it.startsWith("https://youtu.be/") || it.startsWith("http://www.youtube.com/") ||
+            it.startsWith("http://youtube.com/") || it.startsWith("http://youtu.be/")
+        }?.trimEnd('.', ',', ')', ']', '،') ?: return
+        val title = shared.replace(link, "").trim().ifBlank { "فيديو من YouTube" }
+        val history = runCatching { org.json.JSONArray(prefs.getString("youtube_shared_history", "[]")) }.getOrElse { org.json.JSONArray() }
+        val updated = org.json.JSONArray().apply {
+            put(JSONObject().put("title", title).put("url", link).put("time", System.currentTimeMillis()))
+            for (i in 0 until minOf(history.length(), 99)) put(history.getJSONObject(i))
+        }
+        prefs.edit().putString("youtube_shared_history", updated.toString()).apply()
+        toast("تمت إضافة الفيديو إلى سجل VidMax")
+        openYoutubeLink(link)
+    }
+
+    private fun openYoutubeLink(link: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link)).apply { setPackage("com.google.android.youtube") }
+        try { startActivity(intent) } catch (_: Exception) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)))
+        }
+    }
+
+    private fun searchYoutube(query: String) {
+        val q = query.trim()
+        if (q.isEmpty()) { toast("اكتب كلمة البحث أولاً"); return }
+        val intent = Intent(Intent.ACTION_SEARCH).apply {
+            setPackage("com.google.android.youtube")
+            putExtra("query", q)
+        }
+        try { startActivity(intent) } catch (_: Exception) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + URLEncoder.encode(q, "UTF-8"))))
+        }
+    }
+
+    private fun showYoutubeHistory() {
+        content.removeAllViews()
+        content.addView(label("سجل فيديوهات YouTube المرسلة إلى VidMax", 18f, white, true))
+        val history = runCatching { org.json.JSONArray(prefs.getString("youtube_shared_history", "[]")) }.getOrElse { org.json.JSONArray() }
+        if (history.length() == 0) {
+            content.addView(label("شارك فيديو من تطبيق YouTube واختر VidMax من قائمة المشاركة؛ سيظهر هنا.", 13f, muted, false).apply { setPadding(0, dp(16), 0, 0) })
+            return
+        }
+        val clear = actionButton("مسح السجل")
+        clear.setOnClickListener { prefs.edit().remove("youtube_shared_history").apply(); showYoutubeHistory() }
+        content.addView(clear, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(8) })
+        for (i in 0 until history.length()) {
+            val item = history.optJSONObject(i) ?: continue
+            val title = item.optString("title", "فيديو من YouTube")
+            val link = item.optString("url")
+            val card = actionButton(title.ifBlank { "فيديو من YouTube" })
+            card.gravity = Gravity.CENTER_VERTICAL or Gravity.RIGHT
+            card.setOnClickListener { if (link.isNotBlank()) openYoutubeLink(link) }
+            content.addView(card, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(7) })
+        }
     }
 
     @Deprecated("Deprecated in Android API; retained for broad device compatibility")
@@ -121,6 +192,9 @@ class MainActivity : Activity() {
         val searchButton = actionButton("بحث")
         searchButton.setOnClickListener { searchVideos(search.text.toString()) }
         searchRow.addView(searchButton, LinearLayout.LayoutParams(dp(62), dp(46)).apply { marginStart = dp(7) })
+        val youtubeSearchButton = actionButton("يوتيوب")
+        youtubeSearchButton.setOnClickListener { searchYoutube(search.text.toString()) }
+        searchRow.addView(youtubeSearchButton, LinearLayout.LayoutParams(dp(72), dp(46)).apply { marginStart = dp(5) })
         root.addView(searchRow)
 
         val tabs = LinearLayout(this).apply {
@@ -132,6 +206,7 @@ class MainActivity : Activity() {
             "الأحدث" to { showFeed("latest") },
             "الأكثر مشاهدة" to { showFeed("views") },
             "التنزيلات" to { showDownloads() },
+            "سجل يوتيوب" to { showYoutubeHistory() },
             "الإعدادات" to { showSettings() }
         ).forEach { item ->
             val b = actionButton(item.first)
