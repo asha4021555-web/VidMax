@@ -23,15 +23,18 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import org.json.JSONTokener
 
 class MainActivity : Activity() {
-    private lateinit var root: LinearLayout
     private lateinit var browser: WebView
     private lateinit var address: EditText
     private lateinit var pageHost: LinearLayout
+    private lateinit var downloadButton: Button
     private var currentPage = "home"
+    private val prefs by lazy { getSharedPreferences("vidmax_settings", Context.MODE_PRIVATE) }
     private val navy by lazy { getColor(R.color.navy) }
     private val surface by lazy { getColor(R.color.surface) }
     private val accent by lazy { getColor(R.color.accent) }
@@ -56,62 +59,79 @@ class MainActivity : Activity() {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        if (currentPage == "browser" && browser.canGoBack()) browser.goBack()
-        else if (currentPage != "home") showHome()
-        else super.onBackPressed()
+        if (currentPage in listOf("home", "shorts", "reels") && browser.canGoBack()) {
+            browser.goBack()
+        } else if (currentPage != "home") {
+            showHome()
+        } else {
+            super.onBackPressed()
+        }
     }
 
     private fun buildShell() {
-        root = LinearLayout(this).apply {
+        val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(navy)
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(12), dp(10), dp(12), dp(8))
+            setPadding(dp(10), dp(8), dp(10), dp(6))
         }
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        header.addView(text("VIDMAX", 23f, accent, true), LinearLayout.LayoutParams(0, dp(48), 1f))
-        val home = smallButton("الرئيسية")
-        home.setOnClickListener { showHome() }
-        header.addView(home)
+        header.addView(text("VIDMAX", 23f, accent, true), LinearLayout.LayoutParams(0, dp(46), 1f))
+        header.addView(text("فيديوهاتك في مكان واحد", 12f, muted, false))
         root.addView(header)
 
-        val addressRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(8)) }
+        val searchRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(5), 0, dp(8))
+        }
         address = EditText(this).apply {
-            hint = "ابحث أو الصق رابط فيديو"
+            hint = "ابحث عن فيديو أو الصق رابطًا"
             textSize = 14f
             setSingleLine(true)
-            imeOptions = EditorInfo.IME_ACTION_GO
-            setTextColor(white); setHintTextColor(muted)
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            setTextColor(white)
+            setHintTextColor(muted)
             setPadding(dp(12), 0, dp(12), 0)
             setBackgroundColor(surface)
-            textDirection = View.TEXT_DIRECTION_LTR
+            textDirection = View.TEXT_DIRECTION_RTL
             setOnEditorActionListener { _, action, _ ->
-                if (action == EditorInfo.IME_ACTION_GO || action == EditorInfo.IME_ACTION_SEARCH) {
-                    navigate(address.text.toString()); true
+                if (action == EditorInfo.IME_ACTION_SEARCH || action == EditorInfo.IME_ACTION_GO) {
+                    searchVideos(address.text.toString())
+                    true
                 } else false
             }
         }
-        addressRow.addView(address, LinearLayout.LayoutParams(0, dp(46), 1f))
-        val go = smallButton("اذهب")
-        go.setOnClickListener { navigate(address.text.toString()) }
-        addressRow.addView(go, LinearLayout.LayoutParams(dp(68), dp(46)).apply { marginStart = dp(6) })
-        root.addView(addressRow)
+        searchRow.addView(address, LinearLayout.LayoutParams(0, dp(46), 1f))
+        val search = smallButton("بحث")
+        search.setOnClickListener { searchVideos(address.text.toString()) }
+        searchRow.addView(search, LinearLayout.LayoutParams(dp(66), dp(46)).apply { marginStart = dp(6) })
+        root.addView(searchRow)
 
-        pageHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(navy) }
+        pageHost = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(navy)
+        }
         root.addView(pageHost, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        val nav = LinearLayout(this).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) }
-        listOf("الرئيسية" to "home", "المتصفح" to "browser", "التنزيلات" to "downloads", "الإعدادات" to "settings").forEach { item ->
+        val nav = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(7), 0, 0)
+        }
+        val items = listOf(
+            "الرائج" to { showHome() },
+            "شورتس" to { showShorts() },
+            "ريلز" to { showReels() },
+            "التنزيلات" to { showDownloads() },
+            "الإعدادات" to { showSettings() }
+        )
+        items.forEach { item ->
             val b = smallButton(item.first)
-            b.setOnClickListener {
-                when (item.second) {
-                    "home" -> showHome()
-                    "browser" -> showBrowser()
-                    "downloads" -> showDownloads()
-                    else -> showSettings()
-                }
-            }
-            nav.addView(b, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(2); marginEnd = dp(2) })
+            b.textSize = 10.5f
+            b.setOnClickListener { item.second() }
+            nav.addView(b, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+                marginStart = dp(2)
+                marginEnd = dp(2)
+            })
         }
         root.addView(nav)
         setContentView(root)
@@ -119,69 +139,134 @@ class MainActivity : Activity() {
 
     private fun configureBrowser() {
         browser = WebView(this)
-        browser.setBackgroundColor(Color.WHITE)
+        browser.setBackgroundColor(Color.BLACK)
         browser.settings.javaScriptEnabled = true
         browser.settings.domStorageEnabled = true
-        browser.settings.mediaPlaybackRequiresUserGesture = true
+        browser.settings.mediaPlaybackRequiresUserGesture = !prefs.getBoolean("autoplay", false)
         browser.settings.loadsImagesAutomatically = true
         browser.settings.javaScriptCanOpenWindowsAutomatically = false
         browser.webChromeClient = WebChromeClient()
         browser.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val url = request?.url?.toString() ?: return false
-                return !(url.startsWith("https://") || url.startsWith("http://"))
+                val scheme = request?.url?.scheme ?: return false
+                // Keep normal web links inside VidMax; never launch the external browser.
+                return scheme != "https" && scheme != "http"
             }
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 if (!url.isNullOrBlank()) address.setText(url)
             }
         }
         browser.setDownloadListener(DownloadListener { url, userAgent, disposition, mime, _ ->
-            enqueueWebDownload(url, userAgent, disposition, mime)
+            enqueueDirectDownload(url, userAgent, disposition, mime)
         })
     }
 
-    private fun showHome() {
-        currentPage = "home"
-        address.setText("")
+    private fun showHome() = showFeed(
+        "home",
+        "https://m.youtube.com/feed/trending",
+        "الفيديوهات الرائجة"
+    )
+
+    private fun showShorts() = showFeed(
+        "shorts",
+        "https://m.youtube.com/shorts/",
+        "شورتس"
+    )
+
+    private fun showReels() = showFeed(
+        "reels",
+        "https://www.instagram.com/reels/",
+        "ريلز"
+    )
+
+    private fun showFeed(page: String, url: String, title: String) {
+        currentPage = page
         pageHost.removeAllViews()
-        val scroll = ScrollView(this)
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(12), dp(8), dp(18))
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
+        val heading = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(2), dp(4), dp(6))
         }
-        content.addView(text("كل فيديوهاتك في مكان واحد", 21f, white, true), match())
-        content.addView(text("افتح موقعك المفضل وشاهد الفيديو داخل VidMax. استخدم زر التنزيل عندما يوفّر الموقع ملفًا قابلًا للتنزيل.", 14f, muted, false).apply {
-            setPadding(0, dp(8), 0, dp(18))
-        }, match())
-        listOf(
-            "YouTube" to "https://m.youtube.com/",
-            "TikTok" to "https://www.tiktok.com/",
-            "Facebook" to "https://m.facebook.com/",
-            "Instagram" to "https://www.instagram.com/",
-            "X / تويتر" to "https://x.com/"
-        ).forEach { site ->
-            val b = makeButton("فتح " + site.first)
-            b.setOnClickListener { address.setText(site.second); showBrowser(); browser.loadUrl(site.second) }
-            content.addView(b, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(7) })
+        heading.addView(text(title, 18f, white, true), LinearLayout.LayoutParams(0, dp(38), 1f))
+        downloadButton = makeButton("تنزيل الفيديو الحالي")
+        downloadButton.textSize = 12f
+        downloadButton.setOnClickListener { downloadCurrentVideo() }
+        if (!prefs.getBoolean("show_download", true)) downloadButton.visibility = View.GONE
+        heading.addView(downloadButton, LinearLayout.LayoutParams(-2, dp(40)))
+        pageHost.addView(heading)
+        if (page == "reels") {
+            pageHost.addView(text(
+                "محتوى ريلز يُعرض داخل التطبيق؛ قد يطلب Instagram تسجيل الدخول حسب سياساته.",
+                11f, muted, false
+            ).apply { setPadding(dp(4), 0, dp(4), dp(5)) })
         }
-        val paste = makeButton("لصق رابط من الحافظة وفتحه")
-        paste.setOnClickListener {
-            val clip = (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip
-            val value = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).coerceToText(this).toString() else ""
-            if (value.isBlank()) toast("الحافظة فارغة") else { address.setText(value); navigate(value) }
-        }
-        content.addView(paste, LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(16) })
-        scroll.addView(content)
-        pageHost.addView(scroll, match())
+        if (browser.parent != null) (browser.parent as android.view.ViewGroup).removeView(browser)
+        pageHost.addView(browser, LinearLayout.LayoutParams(-1, 0, 1f))
+        if (browser.url != url) browser.loadUrl(url)
     }
 
-    private fun showBrowser() {
-        currentPage = "browser"
-        pageHost.removeAllViews()
-        if (browser.parent != null) (browser.parent as android.view.ViewGroup).removeView(browser)
-        pageHost.addView(browser, match())
-        if (browser.url.isNullOrBlank()) browser.loadUrl("https://m.youtube.com/")
+    private fun searchVideos(raw: String) {
+        val query = raw.trim()
+        if (query.isBlank()) {
+            toast("اكتب اسم الفيديو أو الصق الرابط")
+            return
+        }
+        if (query.startsWith("https://") || query.startsWith("http://")) {
+            currentPage = "home"
+            showFeed("home", query, "مشاهدة الفيديو")
+        } else {
+            val target = "https://m.youtube.com/results?search_query=" + Uri.encode(query)
+            showFeed("home", target, "نتائج البحث")
+        }
+        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
+            .hideSoftInputFromWindow(address.windowToken, 0)
+    }
+
+    private fun downloadCurrentVideo() {
+        val script = "(function(){var v=document.querySelector('video');return v?(v.currentSrc||v.src||''):'';})()"
+        browser.evaluateJavascript(script) { encoded ->
+            val mediaUrl = runCatching { JSONTokener(encoded).nextValue() as? String }.getOrNull()
+            if (mediaUrl.isNullOrBlank()) {
+                toast("لم أجد ملف فيديو مباشرًا في الصفحة")
+            } else {
+                enqueueDirectDownload(mediaUrl, browser.settings.userAgentString, "", "video/mp4")
+            }
+        }
+    }
+
+    private fun enqueueDirectDownload(url: String, userAgent: String, disposition: String, mime: String) {
+        val uri = runCatching { Uri.parse(url) }.getOrNull()
+        if (uri?.host.isNullOrBlank() || (uri?.scheme != "https" && uri?.scheme != "http")) {
+            toast("المصدر لا يوفّر رابط ملف مباشرًا للتنزيل")
+            return
+        }
+        val path = uri?.lastPathSegment?.lowercase().orEmpty()
+        if (url.startsWith("blob:") || path.endsWith(".m3u8") || path.endsWith(".mpd")) {
+            toast("هذا بث محمي أو مُجزّأ ولا يمكن تنزيله كملف مباشر")
+            return
+        }
+        val fileName = android.webkit.URLUtil.guessFileName(url, disposition, mime)
+            .replace(Regex("[^A-Za-z0-9._-]"), "_").take(120)
+        try {
+            val request = DownloadManager.Request(uri!!)
+                .setTitle(fileName)
+                .setDescription("تنزيل بواسطة VidMax")
+                .setNotificationVisibility(
+                    if (prefs.getBoolean("download_notification", true))
+                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                    else DownloadManager.Request.VISIBILITY_HIDDEN
+                )
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "VidMax/$fileName")
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(false)
+            if (userAgent.isNotBlank()) request.addRequestHeader("User-Agent", userAgent)
+            val cookie = CookieManager.getInstance().getCookie(url)
+            if (!cookie.isNullOrBlank()) request.addRequestHeader("Cookie", cookie)
+            request.addRequestHeader("Referer", browser.url ?: url)
+            (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+            toast("بدأ تنزيل الملف المباشر")
+        } catch (_: Exception) {
+            toast("تعذر بدء التنزيل من هذا المصدر")
+        }
     }
 
     private fun showDownloads() {
@@ -216,7 +301,8 @@ class MainActivity : Activity() {
                     else -> "حالة غير معروفة"
                 }
                 list.addView(text("$title\n$statusText", 15f, white, false).apply {
-                    setPadding(dp(12), dp(12), dp(12), dp(12)); setBackgroundColor(surface)
+                    setPadding(dp(12), dp(12), dp(12), dp(12))
+                    setBackgroundColor(surface)
                 }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
             }
         }
@@ -230,56 +316,55 @@ class MainActivity : Activity() {
     private fun showSettings() {
         currentPage = "settings"
         pageHost.removeAllViews()
+        val scroll = ScrollView(this)
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), dp(14), dp(10), dp(10))
+            setPadding(dp(12), dp(14), dp(12), dp(18))
             layoutDirection = View.LAYOUT_DIRECTION_RTL
         }
-        content.addView(text("الإعدادات", 21f, white, true), match())
-        content.addView(text("لغة التطبيق: العربية\nمكان الحفظ: Downloads/VidMax\nإشعارات التنزيل: من خلال نظام Android.", 15f, muted, false).apply {
-            setPadding(0, dp(14), 0, dp(14))
+        content.addView(text("إعدادات التطبيق", 21f, white, true), match())
+        content.addView(text("غيّر الاختيارات وسيتم حفظها تلقائيًا.", 13f, muted, false).apply {
+            setPadding(0, dp(5), 0, dp(12))
         }, match())
-        content.addView(text("تنزيل الفيديو يعتمد على إتاحة الموقع لرابط ملف قابل للتنزيل. بعض المنصات تمنع التنزيل أو تشترط استخدام أدواتها الرسمية؛ لا يتجاوز VidMax هذه القيود.", 14f, muted, false), match())
-        pageHost.addView(content, match())
+        addSettingSwitch(content, "تشغيل الفيديو تلقائيًا", "autoplay", false) { enabled ->
+            browser.settings.mediaPlaybackRequiresUserGesture = !enabled
+        }
+        addSettingSwitch(content, "إظهار زر تنزيل الفيديو", "show_download", true) { enabled ->
+            if (::downloadButton.isInitialized) {
+                downloadButton.visibility = if (enabled) View.VISIBLE else View.GONE
+            }
+        }
+        addSettingSwitch(content, "إشعار عند اكتمال التنزيل", "download_notification", true) { }
+        content.addView(text(
+            "مكان الحفظ: مجلد Downloads/VidMax على جهازك.\n" +
+            "ملاحظة: زر التنزيل يحفظ الملفات المباشرة التي يسمح الموقع بالوصول إليها. لا يستطيع تنزيل بث YouTube المحمي أو المقسّم إلى أجزاء.",
+            13f, muted, false
+        ).apply { setPadding(0, dp(16), 0, 0) }, match())
+        scroll.addView(content)
+        pageHost.addView(scroll, match())
     }
 
-    private fun navigate(raw: String) {
-        val value = raw.trim()
-        if (value.isBlank()) { toast("اكتب كلمة بحث أو رابطًا"); return }
-        val target = if (value.startsWith("https://") || value.startsWith("http://")) value
-            else if (value.contains(".") && !value.contains(" ")) "https://$value"
-            else "https://www.google.com/search?q=" + Uri.encode(value)
-        val uri = runCatching { Uri.parse(target) }.getOrNull()
-        if (uri?.host.isNullOrBlank() || (uri?.scheme != "https" && uri?.scheme != "http")) {
-            toast("الرابط غير صحيح"); return
+    private fun addSettingSwitch(
+        parent: LinearLayout,
+        label: String,
+        key: String,
+        defaultValue: Boolean,
+        onChanged: (Boolean) -> Unit
+    ) {
+        val control = Switch(this).apply {
+            text = label
+            textSize = 15f
+            setTextColor(white)
+            isChecked = prefs.getBoolean(key, defaultValue)
+            setPadding(0, dp(10), 0, dp(10))
+            setOnCheckedChangeListener { _, checked ->
+                prefs.edit().putBoolean(key, checked).apply()
+                onChanged(checked)
+            }
         }
-        showBrowser()
-        browser.loadUrl(target)
-        (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(address.windowToken, 0)
-    }
-
-    private fun enqueueWebDownload(url: String, userAgent: String, disposition: String, mime: String) {
-        val uri = runCatching { Uri.parse(url) }.getOrNull()
-        if (uri?.host.isNullOrBlank() || (uri.scheme != "https" && uri.scheme != "http")) {
-            toast("نوع الرابط غير مدعوم للتنزيل"); return
-        }
-        val fileName = android.webkit.URLUtil.guessFileName(url, disposition, mime)
-            .replace(Regex("[^A-Za-z0-9._-]"), "_").take(120)
-        try {
-            val request = DownloadManager.Request(uri)
-                .setTitle(fileName)
-                .setDescription("تنزيل بواسطة VidMax")
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "VidMax/$fileName")
-                .setAllowedOverMetered(true)
-                .setAllowedOverRoaming(false)
-            if (userAgent.isNotBlank()) request.addRequestHeader("User-Agent", userAgent)
-            val cookie = CookieManager.getInstance().getCookie(url)
-            if (!cookie.isNullOrBlank()) request.addRequestHeader("Cookie", cookie)
-            request.addRequestHeader("Referer", browser.url ?: url)
-            (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
-            toast("أُضيف الملف إلى التنزيلات")
-        } catch (_: Exception) { toast("تعذر بدء التنزيل من هذا الموقع") }
+        parent.addView(control, LinearLayout.LayoutParams(-1, dp(58)))
+        val divider = View(this).apply { setBackgroundColor(surface) }
+        parent.addView(divider, LinearLayout.LayoutParams(-1, dp(1)))
     }
 
     private fun acceptIncomingLink(intent: Intent?) {
@@ -288,23 +373,39 @@ class MainActivity : Activity() {
             Intent.ACTION_VIEW -> intent.dataString
             else -> null
         }
-        if (!shared.isNullOrBlank()) { address.setText(shared.trim()); navigate(shared) }
+        if (!shared.isNullOrBlank()) {
+            address.setText(shared.trim())
+            searchVideos(shared.trim())
+        }
     }
 
     private fun text(value: String, size: Float, color: Int, bold: Boolean) = TextView(this).apply {
-        text = value; textSize = size; setTextColor(color)
+        text = value
+        textSize = size
+        setTextColor(color)
         if (bold) setTypeface(null, android.graphics.Typeface.BOLD)
-        gravity = Gravity.RIGHT; textDirection = View.TEXT_DIRECTION_RTL
+        gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+        textDirection = View.TEXT_DIRECTION_RTL
     }
+
     private fun makeButton(value: String) = Button(this).apply {
-        text = value; textSize = 14f; isAllCaps = false
-        setTextColor(navy); setBackgroundColor(accent)
+        text = value
+        textSize = 14f
+        isAllCaps = false
+        setTextColor(navy)
+        setBackgroundColor(accent)
     }
+
     private fun smallButton(value: String) = Button(this).apply {
-        text = value; textSize = 11f; isAllCaps = false
-        setTextColor(white); setBackgroundColor(surface)
-        minHeight = dp(40); minimumHeight = dp(40)
+        text = value
+        textSize = 11f
+        isAllCaps = false
+        setTextColor(white)
+        setBackgroundColor(surface)
+        minHeight = dp(40)
+        minimumHeight = dp(40)
     }
+
     private fun match() = LinearLayout.LayoutParams(-1, -2)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_LONG).show()
