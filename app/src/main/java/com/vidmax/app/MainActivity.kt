@@ -196,7 +196,7 @@ class MainActivity : Activity() {
         for (base in apiBases) {
             val result = runCatching {
                 val endpoint = if (!query.isNullOrBlank()) {
-                    "$base/api/v1/search/videos?count=20&sort=-match&search=" + URLEncoder.encode(query, "UTF-8")
+                    "$base/api/v1/search/videos?count=20&sort=-publishedAt&search=" + URLEncoder.encode(query, "UTF-8")
                 } else {
                     "$base/api/v1/videos?count=20&sort=$sort&nsfw=false"
                 }
@@ -220,7 +220,7 @@ class MainActivity : Activity() {
                     val hasFiles = (listed.optJSONArray("files")?.length() ?: 0) > 0
                     val hasPlaylists = (listed.optJSONArray("streamingPlaylists")?.length() ?: 0) > 0
                     if (!hasFiles && !hasPlaylists && id.isNotBlank()) {
-                        details = fetchVideoDetails(base, id) ?: listed
+                        details = runCatching { fetchVideoDetails(base, id) }.getOrNull() ?: listed
                     }
 
                     var selected = ""
