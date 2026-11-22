@@ -1,6 +1,7 @@
 package com.vidmax.app
 
 import android.app.Activity
+import android.accounts.AccountManager
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
@@ -41,6 +42,7 @@ class MainActivity : Activity() {
     private lateinit var content: LinearLayout
     private lateinit var search: EditText
     private var currentMode = "trending"
+    private val googleAccountRequest = 4207
 
     // A native PeerTube feed: no YouTube/Instagram WebView and no browser chrome.
     private val apiBases = listOf("https://peertube.cpy.re", "https://peertube2.cpy.re")
@@ -51,6 +53,33 @@ class MainActivity : Activity() {
         window.navigationBarColor = navy
         buildShell()
         showFeed("trending")
+    }
+
+    @Deprecated("Deprecated in Android API; retained for broad device compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == googleAccountRequest) {
+            if (resultCode == RESULT_OK) {
+                val accountName = data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME).orEmpty()
+                if (accountName.isNotBlank()) {
+                    prefs.edit().putString("google_account_name", accountName).apply()
+                    toast("تم اختيار حساب Google داخل VidMax")
+                } else toast("لم يتم استلام بيانات الحساب")
+            }
+            showSettings()
+        }
+    }
+
+    private fun chooseGoogleAccount() {
+        try {
+            val intent = AccountManager.newChooseAccountIntent(
+                null, null, arrayOf("com.google"), false,
+                "اختَر حساب Google الذي تريد ربطه بواجهة VidMax", null, null
+            )
+            startActivityForResult(intent, googleAccountRequest)
+        } catch (_: Exception) {
+            toast("تعذر فتح اختيار حساب Google على هذا الجهاز")
+        }
     }
 
     override fun onDestroy() {
@@ -382,6 +411,28 @@ class MainActivity : Activity() {
     private fun showSettings() {
         content.removeAllViews()
         content.addView(label("إعدادات VidMax", 20f, white, true))
+        content.addView(label("حساب Google", 14f, accent, true).apply { setPadding(0, dp(14), 0, dp(4)) })
+        val selectedGoogleAccount = prefs.getString("google_account_name", null)
+        content.addView(label(
+            if (selectedGoogleAccount.isNullOrBlank()) "لم يتم اختيار حساب Google" else "الحساب المختار: $selectedGoogleAccount",
+            13f, muted, false
+        ).apply { setPadding(0, dp(3), 0, dp(8)) })
+        val chooseAccount = actionButton(if (selectedGoogleAccount.isNullOrBlank()) "اختيار حساب Google" else "تغيير حساب Google")
+        chooseAccount.setOnClickListener { chooseGoogleAccount() }
+        content.addView(chooseAccount, LinearLayout.LayoutParams(-1, dp(46)))
+        if (!selectedGoogleAccount.isNullOrBlank()) {
+            val disconnect = actionButton("فصل الحساب من VidMax")
+            disconnect.setOnClickListener {
+                prefs.edit().remove("google_account_name").apply()
+                showSettings()
+                toast("تم فصل الحساب من VidMax فقط")
+            }
+            content.addView(disconnect, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(6) })
+        }
+        content.addView(label(
+            "تنبيه: اختيار الحساب يحفظ عنوانه داخل التطبيق فقط. Google لا تتيح عبر واجهة YouTube الرسمية قراءة سجل المشاهدة الخاص تلقائيًا.",
+            11f, muted, false
+        ).apply { setPadding(0, dp(8), 0, dp(4)) })
         content.addView(label("التنزيلات", 14f, accent, true).apply { setPadding(0, dp(14), 0, dp(4)) })
         addSetting("إظهار إشعارات التنزيل", "download_notification", true)
         addSetting("التنزيل عبر Wi-Fi فقط", "wifi_only", false)
