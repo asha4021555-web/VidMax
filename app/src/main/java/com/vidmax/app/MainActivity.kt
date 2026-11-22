@@ -195,75 +195,112 @@ class MainActivity : Activity() {
         }
         for (base in apiBases) {
             val result = runCatching {
-                var endpoint = if (!query.isNullOrBlank()) {
-                    "$base/api/v1/search/videos?count=30&sort=$sort&search=" + URLEncoder.encode(query, "UTF-8")
+                val endpoint = if (!query.isNullOrBlank()) {
+                    "$base/api/v1/search/videos?count=20&sort=-match&search=" + URLEncoder.encode(query, "UTF-8")
                 } else {
-                    "$base/api/v1/videos?count=30&sort=$sort&nsfw=false"
+                    "$base/api/v1/videos?count=20&sort=$sort&nsfw=false"
                 }
                 val connection = URL(endpoint).openConnection() as HttpURLConnection
                 connection.connectTimeout = 10000
                 connection.readTimeout = 15000
                 connection.setRequestProperty("Accept", "application/json")
-                connection.setRequestProperty("User-Agent", "VidMax/2.1 Android")
-                try {
+                connection.setRequestProperty("User-Agent", "VidMax/2.2 Android")
+                val json = try {
                     if (connection.responseCode !in 200..299) error("HTTP ${connection.responseCode}")
-                    val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-                    val data = json.optJSONArray("data") ?: return@runCatching emptyList<VideoItem>()
-                    buildList {
-                        for (i in 0 until data.length()) {
-                            val item = data.optJSONObject(i) ?: continue
-                            val files = item.optJSONArray("files")
-                            var selected = ""
-                            var selectedHeight = -1
-                            var selectedIsHls = false
-                            if (files != null) for (j in 0 until files.length()) {
-                                val file = files.optJSONObject(j) ?: continue
-                                val height = file.optJSONObject("resolution")?.optInt("id", 0) ?: 0
-                                val raw = file.optString("fileUrl").ifBlank { file.optString("fileDownloadUrl") }
+                    JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                } finally { connection.disconnect() }
+
+                val data = json.optJSONArray("data") ?: return@runCatching emptyList<VideoItem>()
+                val videos = mutableListOf<VideoItem>()
+                for (i in 0 until data.length()) {
+                    if (videos.size >= 15) break
+                    val listed = data.optJSONObject(i) ?: continue
+                    val id = listed.optString("uuid").ifBlank { listed.optString("id") }
+                    var details = listed
+                    val hasFiles = (listed.optJSONArray("files")?.length() ?: 0) > 0
+                    val hasPlaylists = (listed.optJSONArray("streamingPlaylists")?.length() ?: 0) > 0
+                    if (!hasFiles && !hasPlaylists && id.isNotBlank()) {
+                        details = fetchVideoDetails(base, id) ?: listed
+                    }
+
+                    var selected = ""
+                    var selectedHeight = -1
+                    var selectedIsHls = false
+                    val files = details.optJSONArray("files")
+                    if (files != null) for (j in 0 until files.length()) {
+                        val file = files.optJSONObject(j) ?: continue
+                        val height = file.optJSONObject("resolution")?.optInt("id", 0) ?: 0
+                        val raw = file.optString("fileUrl").ifBlank { file.optString("fileDownloadUrl") }
+                        val resolved = resolveServerUrl(base, raw)
+                        if (resolved.isNotBlank() && height <= 720 && height > selectedHeight) {
+                            selected = resolved
+                            selectedHeight = height
+                            selectedIsHls = false
+                        } else if (selected.isBlank() && resolved.isNotBlank()) {
+                            selected = resolved
+                            selectedIsHls = false
+                        }
+                    }
+
+                    if (selected.isBlank()) {
+                        val playlists = details.optJSONArray("streamingPlaylists")
+                        if (playlists != null) for (j in 0 until playlists.length()) {
+                            val playlist = playlists.optJSONObject(j) ?: continue
+                            val playlistUrl = resolveServerUrl(base, playlist.optString("playlistUrl"))
+                            if (playlistUrl.startsWith("https://") || playlistUrl.startsWith("http://")) {
+                                selected = playlistUrl
+                                selectedIsHls = true
+                                break
+                            }
+                            val playlistFiles = playlist.optJSONArray("files")
+                            if (playlistFiles != null && playlistFiles.length() > 0) {
+                                val file = playlistFiles.optJSONObject(0)
+                                val raw = file?.optString("fileUrl").orEmpty()
                                 val resolved = resolveServerUrl(base, raw)
-                                if (resolved.isNotBlank() && (height <= 720 && height > selectedHeight)) {
-                                    selected = resolved
-                                    selectedHeight = height
-                                    selectedIsHls = false
-                                } else if (selected.isBlank() && resolved.isNotBlank()) {
+                                if (resolved.isNotBlank()) {
                                     selected = resolved
                                     selectedIsHls = false
+                                    break
                                 }
-                            }
-
-                            // Newer PeerTube instances may expose HLS playlists instead of direct files.
-                            if (selected.isBlank()) {
-                                val playlists = item.optJSONArray("streamingPlaylists")
-                                if (playlists != null) {
-                                    for (j in 0 until playlists.length()) {
-                                        val playlist = playlists.optJSONObject(j) ?: continue
-                                        val playlistUrl = resolveServerUrl(base, playlist.optString("playlistUrl"))
-                                        if (playlistUrl.startsWith("https://") || playlistUrl.startsWith("http://")) {
-                                            selected = playlistUrl
-                                            selectedIsHls = true
-                                            break
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (selected.startsWith("https://") || selected.startsWith("http://")) {
-                                add(VideoItem(
-                                    title = item.optString("name", "فيديو بدون عنوان"),
-                                    channel = item.optJSONObject("account")?.optString("displayName").orEmpty(),
-                                    thumbnail = resolveServerUrl(base, item.optString("thumbnailPath")),
-                                    stream = selected,
-                                    serverBase = base,
-                                    isHls = selectedIsHls
-                                ))
                             }
                         }
                     }
-                } finally { connection.disconnect() }
+
+                    if (selected.startsWith("https://") || selected.startsWith("http://")) {
+                        val thumbnail = listed.optString("thumbnailPath")
+                            .ifBlank { details.optString("thumbnailPath") }
+                            .ifBlank {
+                                val thumbs = listed.optJSONArray("thumbnails") ?: details.optJSONArray("thumbnails")
+                                thumbs?.optJSONObject(0)?.optString("fileUrl").orEmpty()
+                            }
+                        videos.add(VideoItem(
+                            title = listed.optString("name").ifBlank { details.optString("name", "فيديو بدون عنوان") },
+                            channel = listed.optJSONObject("account")?.optString("displayName")
+                                ?: details.optJSONObject("account")?.optString("displayName").orEmpty(),
+                            thumbnail = resolveServerUrl(base, thumbnail),
+                            stream = selected,
+                            serverBase = base,
+                            isHls = selectedIsHls
+                        ))
+                    }
+                }
+                videos
             }.getOrNull()
             if (!result.isNullOrEmpty()) return result
         }
         return emptyList()
+    }
+
+    private fun fetchVideoDetails(base: String, id: String): JSONObject? {
+        val connection = URL("$base/api/v1/videos/${URLEncoder.encode(id, "UTF-8")}").openConnection() as HttpURLConnection
+        connection.connectTimeout = 8000
+        connection.readTimeout = 12000
+        connection.setRequestProperty("Accept", "application/json")
+        connection.setRequestProperty("User-Agent", "VidMax/2.2 Android")
+        return try {
+            if (connection.responseCode !in 200..299) null
+            else JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+        } finally { connection.disconnect() }
     }
 
     private fun resolveServerUrl(base: String, path: String): String {
@@ -325,7 +362,8 @@ class MainActivity : Activity() {
         card.setOnClickListener {
             startActivity(Intent(this, PlayerActivity::class.java)
                 .putExtra(PlayerActivity.EXTRA_MEDIA_URI, video.stream)
-                .putExtra(PlayerActivity.EXTRA_AUTOPLAY, prefs.getBoolean("autoplay", true)))
+                .putExtra(PlayerActivity.EXTRA_AUTOPLAY, prefs.getBoolean("autoplay", true))
+                .putExtra(PlayerActivity.EXTRA_IS_HLS, video.isHls))
         }
         content.addView(card, LinearLayout.LayoutParams(-1, -2).apply {
             bottomMargin = dp(12)
