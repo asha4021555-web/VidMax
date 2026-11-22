@@ -195,8 +195,11 @@ class MainActivity : Activity() {
         }
         for (base in apiBases) {
             val result = runCatching {
-                var endpoint = "$base/api/v1/videos?count=30&sort=$sort&nsfw=false"
-                if (!query.isNullOrBlank()) endpoint += "&search=" + URLEncoder.encode(query, "UTF-8")
+                var endpoint = if (!query.isNullOrBlank()) {
+                    "$base/api/v1/search/videos?count=30&sort=$sort&search=" + URLEncoder.encode(query, "UTF-8")
+                } else {
+                    "$base/api/v1/videos?count=30&sort=$sort&nsfw=false"
+                }
                 val connection = URL(endpoint).openConnection() as HttpURLConnection
                 connection.connectTimeout = 10000
                 connection.readTimeout = 15000
