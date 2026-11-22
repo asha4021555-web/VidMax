@@ -73,8 +73,8 @@ class MainActivity : Activity() {
     private fun chooseGoogleAccount() {
         try {
             val intent = AccountManager.newChooseAccountIntent(
-                null, null, arrayOf("com.google"), false,
-                "اختَر حساب Google الذي تريد ربطه بواجهة VidMax", null, null
+                null, null, arrayOf("com.google"),
+                "اختَر حساب Google الذي تريد ربطه بواجهة VidMax", null, null, null
             )
             startActivityForResult(intent, googleAccountRequest)
         } catch (_: Exception) {
