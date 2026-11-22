@@ -45,7 +45,7 @@ class MainActivity : Activity() {
     private val googleAccountRequest = 4207
 
     // A native PeerTube feed: no YouTube/Instagram WebView and no browser chrome.
-    private val apiBases = listOf("https://peertube.cpy.re", "https://peertube2.cpy.re")
+    private val apiBases = listOf("https://peertube.cpy.re", "https://peertube2.cpy.re", "https://peertube3.cpy.re")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -212,6 +212,7 @@ class MainActivity : Activity() {
                             val files = item.optJSONArray("files")
                             var selected = ""
                             var selectedHeight = -1
+                            var selectedIsHls = false
                             if (files != null) for (j in 0 until files.length()) {
                                 val file = files.optJSONObject(j) ?: continue
                                 val height = file.optJSONObject("resolution")?.optInt("id", 0) ?: 0
@@ -220,15 +221,37 @@ class MainActivity : Activity() {
                                 if (resolved.isNotBlank() && (height <= 720 && height > selectedHeight)) {
                                     selected = resolved
                                     selectedHeight = height
-                                } else if (selected.isBlank() && resolved.isNotBlank()) selected = resolved
+                                    selectedIsHls = false
+                                } else if (selected.isBlank() && resolved.isNotBlank()) {
+                                    selected = resolved
+                                    selectedIsHls = false
+                                }
                             }
+
+                            // Newer PeerTube instances may expose HLS playlists instead of direct files.
+                            if (selected.isBlank()) {
+                                val playlists = item.optJSONArray("streamingPlaylists")
+                                if (playlists != null) {
+                                    for (j in 0 until playlists.length()) {
+                                        val playlist = playlists.optJSONObject(j) ?: continue
+                                        val playlistUrl = resolveServerUrl(base, playlist.optString("playlistUrl"))
+                                        if (playlistUrl.startsWith("https://") || playlistUrl.startsWith("http://")) {
+                                            selected = playlistUrl
+                                            selectedIsHls = true
+                                            break
+                                        }
+                                    }
+                                }
+                            }
+
                             if (selected.startsWith("https://") || selected.startsWith("http://")) {
                                 add(VideoItem(
                                     title = item.optString("name", "فيديو بدون عنوان"),
                                     channel = item.optJSONObject("account")?.optString("displayName").orEmpty(),
                                     thumbnail = resolveServerUrl(base, item.optString("thumbnailPath")),
                                     stream = selected,
-                                    serverBase = base
+                                    serverBase = base,
+                                    isHls = selectedIsHls
                                 ))
                             }
                         }
@@ -283,6 +306,10 @@ class MainActivity : Activity() {
         }
         info.addView(download, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(8) })
         download.setOnClickListener {
+            if (video.isHls) {
+                toast("التنزيل المباشر غير متاح لهذا الفيديو، يمكنك مشاهدته")
+                return@setOnClickListener
+            }
             if (prefs.getBoolean("confirm_download", false)) {
                 android.app.AlertDialog.Builder(this)
                     .setMessage("تنزيل الفيديو: ${video.title}؟")
@@ -487,6 +514,7 @@ class MainActivity : Activity() {
         val channel: String,
         val thumbnail: String,
         val stream: String,
-        val serverBase: String
+        val serverBase: String,
+        val isHls: Boolean = false
     )
 }
