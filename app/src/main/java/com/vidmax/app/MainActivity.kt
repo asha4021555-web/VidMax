@@ -77,7 +77,7 @@ class MainActivity : Activity() {
         search = EditText(this).apply {
             hint = "ابحث عن فيديو"
             textSize = 14f
-            singleLine = true
+            setSingleLine(true)
             setTextColor(white)
             setHintTextColor(muted)
             setPadding(dp(14), 0, dp(14), 0)
@@ -114,7 +114,7 @@ class MainActivity : Activity() {
         }
         root.addView(tabs)
 
-        val scroll = ScrollView(this).apply { fillViewport = true }
+        val scroll = ScrollView(this).apply { setFillViewport(true) }
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(2), 0, dp(12))
