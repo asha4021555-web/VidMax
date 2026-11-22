@@ -79,7 +79,7 @@ class MainActivity : Activity() {
         address = EditText(this).apply {
             hint = "ابحث أو الصق رابط فيديو"
             textSize = 14f
-            singleLine = true
+            setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_GO
             setTextColor(white); setHintTextColor(muted)
             setPadding(dp(12), 0, dp(12), 0)
