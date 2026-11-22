@@ -196,9 +196,9 @@ class MainActivity : Activity() {
         for (base in apiBases) {
             val result = runCatching {
                 val endpoint = if (!query.isNullOrBlank()) {
-                    "$base/api/v1/search/videos?count=20&sort=-publishedAt&search=" + URLEncoder.encode(query, "UTF-8")
+                    "$base/api/v1/search/videos?count=100&sort=-publishedAt&search=" + URLEncoder.encode(query, "UTF-8")
                 } else {
-                    "$base/api/v1/videos?count=20&sort=$sort&nsfw=false"
+                    "$base/api/v1/videos?count=100&sort=$sort&nsfw=false"
                 }
                 val connection = URL(endpoint).openConnection() as HttpURLConnection
                 connection.connectTimeout = 10000
@@ -213,7 +213,6 @@ class MainActivity : Activity() {
                 val data = json.optJSONArray("data") ?: return@runCatching emptyList<VideoItem>()
                 val videos = mutableListOf<VideoItem>()
                 for (i in 0 until data.length()) {
-                    if (videos.size >= 15) break
                     val listed = data.optJSONObject(i) ?: continue
                     val id = listed.optString("uuid").ifBlank { listed.optString("id") }
                     var details = listed
@@ -224,44 +223,49 @@ class MainActivity : Activity() {
                     }
 
                     var selected = ""
+                    var selectedDownload = ""
                     var selectedHeight = -1
                     var selectedIsHls = false
                     val files = details.optJSONArray("files")
                     if (files != null) for (j in 0 until files.length()) {
                         val file = files.optJSONObject(j) ?: continue
                         val height = file.optJSONObject("resolution")?.optInt("id", 0) ?: 0
-                        val raw = file.optString("fileUrl").ifBlank { file.optString("fileDownloadUrl") }
-                        val resolved = resolveServerUrl(base, raw)
-                        if (resolved.isNotBlank() && height <= 720 && height > selectedHeight) {
-                            selected = resolved
+                        // PeerTube resolution 0 is an audio-only asset, never use it as a video.
+                        val hasVideo = if (file.has("hasVideo")) file.optBoolean("hasVideo") else height > 0
+                        if (!hasVideo || height <= 0) continue
+                        val rawPlayback = file.optString("fileUrl")
+                        val rawDownload = file.optString("fileDownloadUrl").ifBlank { rawPlayback }
+                        val playback = resolveServerUrl(base, rawPlayback)
+                        val download = resolveServerUrl(base, rawDownload)
+                        if (playback.isNotBlank() && height > selectedHeight) {
+                            selected = playback
+                            selectedDownload = download
                             selectedHeight = height
-                            selectedIsHls = false
-                        } else if (selected.isBlank() && resolved.isNotBlank()) {
-                            selected = resolved
                             selectedIsHls = false
                         }
                     }
 
+                    // If there is no standalone web video file, play the HLS master playlist.
+                    // Its fragmented child files must not be passed to DownloadManager as an MP4.
                     if (selected.isBlank()) {
                         val playlists = details.optJSONArray("streamingPlaylists")
                         if (playlists != null) for (j in 0 until playlists.length()) {
                             val playlist = playlists.optJSONObject(j) ?: continue
+                            val playlistFiles = playlist.optJSONArray("files")
+                            val hasPlayableVideo = playlistFiles?.let { list ->
+                                (0 until list.length()).any { index ->
+                                    val f = list.optJSONObject(index) ?: return@any false
+                                    val resolution = f.optJSONObject("resolution")?.optInt("id", 0) ?: 0
+                                    val hasVideo = if (f.has("hasVideo")) f.optBoolean("hasVideo") else resolution > 0
+                                    hasVideo && resolution > 0
+                                }
+                            } ?: false
                             val playlistUrl = resolveServerUrl(base, playlist.optString("playlistUrl"))
-                            if (playlistUrl.startsWith("https://") || playlistUrl.startsWith("http://")) {
+                            if (hasPlayableVideo && playlistUrl.startsWith("https://") || hasPlayableVideo && playlistUrl.startsWith("http://")) {
                                 selected = playlistUrl
                                 selectedIsHls = true
+                                selectedDownload = ""
                                 break
-                            }
-                            val playlistFiles = playlist.optJSONArray("files")
-                            if (playlistFiles != null && playlistFiles.length() > 0) {
-                                val file = playlistFiles.optJSONObject(0)
-                                val raw = file?.optString("fileUrl").orEmpty()
-                                val resolved = resolveServerUrl(base, raw)
-                                if (resolved.isNotBlank()) {
-                                    selected = resolved
-                                    selectedIsHls = false
-                                    break
-                                }
                             }
                         }
                     }
@@ -279,6 +283,7 @@ class MainActivity : Activity() {
                                 ?: details.optJSONObject("account")?.optString("displayName").orEmpty(),
                             thumbnail = resolveServerUrl(base, thumbnail),
                             stream = selected,
+                            downloadUrl = selectedDownload,
                             serverBase = base,
                             isHls = selectedIsHls
                         ))
@@ -346,8 +351,8 @@ class MainActivity : Activity() {
         }
         info.addView(download, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(8) })
         download.setOnClickListener {
-            if (video.isHls) {
-                toast("التنزيل المباشر غير متاح لهذا الفيديو، يمكنك مشاهدته")
+            if (video.isHls || video.downloadUrl.isBlank()) {
+                toast("التنزيل غير متاح لهذا الفيديو؛ يمكن مشاهدته داخل التطبيق")
                 return@setOnClickListener
             }
             if (prefs.getBoolean("confirm_download", false)) {
@@ -396,7 +401,7 @@ class MainActivity : Activity() {
         try {
             val name = video.title.replace(Regex("[^A-Za-z0-9ء-ي._ -]"), "")
                 .trim().take(70).ifBlank { "VidMax_video" } + ".mp4"
-            val request = DownloadManager.Request(Uri.parse(video.stream))
+            val request = DownloadManager.Request(Uri.parse(video.downloadUrl))
                 .setTitle(name)
                 .setDescription("تنزيل بواسطة VidMax")
                 .setNotificationVisibility(
@@ -555,6 +560,7 @@ class MainActivity : Activity() {
         val channel: String,
         val thumbnail: String,
         val stream: String,
+        val downloadUrl: String,
         val serverBase: String,
         val isHls: Boolean = false
     )
