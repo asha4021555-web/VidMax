@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -42,10 +43,10 @@ class PlayerActivity : Activity() {
         setContentView(FrameLayout(this).apply {
             addView(playerView, FrameLayout.LayoutParams(-1, -1))
         })
-        initializePlayer(uri, intent.getBooleanExtra(EXTRA_AUTOPLAY, true))
+        initializePlayer(uri, intent.getBooleanExtra(EXTRA_AUTOPLAY, true), intent.getBooleanExtra(EXTRA_IS_HLS, false))
     }
 
-    private fun initializePlayer(uri: Uri, autoplay: Boolean) {
+    private fun initializePlayer(uri: Uri, autoplay: Boolean, isHls: Boolean) {
         val instance = ExoPlayer.Builder(this).build()
         player = instance
         playerView.player = instance
@@ -58,7 +59,8 @@ class PlayerActivity : Activity() {
                 ).show()
             }
         })
-        instance.setMediaItem(MediaItem.fromUri(uri))
+        val mediaItem = if (isHls) MediaItem.Builder().setUri(uri).setMimeType(MimeTypes.APPLICATION_M3U8).build() else MediaItem.fromUri(uri)
+        instance.setMediaItem(mediaItem)
         instance.prepare()
         instance.playWhenReady = autoplay
     }
@@ -78,5 +80,6 @@ class PlayerActivity : Activity() {
     companion object {
         const val EXTRA_MEDIA_URI = "com.vidmax.app.extra.MEDIA_URI"
         const val EXTRA_AUTOPLAY = "com.vidmax.app.extra.AUTOPLAY"
+        const val EXTRA_IS_HLS = "com.vidmax.app.extra.IS_HLS"
     }
 }
