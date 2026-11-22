@@ -86,21 +86,27 @@ class MainActivity : Activity() {
     }
 
     private fun openYoutubeLink(link: String) {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link)).apply { setPackage("com.google.android.youtube") }
-        try { startActivity(intent) } catch (_: Exception) {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)))
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link)).apply {
+            setPackage("com.google.android.youtube")
+        }
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+            toast("تطبيق YouTube غير مثبت أو لا يستطيع فتح الرابط")
         }
     }
 
     private fun searchYoutube(query: String) {
         val q = query.trim()
         if (q.isEmpty()) { toast("اكتب كلمة البحث أولاً"); return }
-        val intent = Intent(Intent.ACTION_SEARCH).apply {
+        val url = "https://www.youtube.com/results?search_query=" + URLEncoder.encode(q, "UTF-8")
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
             setPackage("com.google.android.youtube")
-            putExtra("query", q)
         }
-        try { startActivity(intent) } catch (_: Exception) {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + URLEncoder.encode(q, "UTF-8"))))
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+            toast("تعذر فتح البحث داخل تطبيق YouTube. تأكد من تثبيت التطبيق وتحديثه.")
         }
     }
 
